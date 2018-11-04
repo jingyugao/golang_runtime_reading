@@ -153,6 +153,90 @@ fixalloc分配的对象可以被释放，但是这个内存可能会被fixalloc 
 Zero-initialization versus zeroing
 ==================================
 
+runtime中有两种置零方式，取决于内存是否已经初始化为类型安全的状态
+
+如果内存不是类型安全的状态，意味着它可能含有垃圾，
+因为它是刚刚分配的且初始化以供首次使用，
+这样它必须使用 `memclrNoHeapPointers` 或非指针的写来零初始化
+这不需要写屏障。
+(什么是非指针写 "non-pointer write" ???
+类型安全是什么意思，"type-safe" ???
+
+如果内存已经处于类型安全状态且简单的设置为0，这必须使用"regular write"
+即 `typedmemclr` ,或 `memclrHasPointers`。这需要写屏障。
+
+runtime-only 编译准则
+=================================
+
+除了"go doc compile" 中的"//go:"准则之外，
+还有一些只能用于runtime的编译准则。
+
+go:systemstack
+--------------
+
+`go:systemstack` 暗示一个函数必须在系统栈运行。
+它会由一个特殊函数序言动态检查。
+(函数序言即在汇编中，函数开始的那几行代码，
+用来调节栈，寄存器之类的。参考wiki)
+
+go:nowritebarrier
+-----------------
+
+`go:nowritebarrier` 指示编译器如果发现在下面的函数中包含写屏障，
+产生一个错误。
+(这不能阻止写屏障的产生，这只是个断言)
+
+通常你需要 `go:nowritebarruerrec`。
+`go:nowritebarrier`主要用于最好不要有写屏障的情形，
+但是不需要严格保证。
+(类似于warning，还是可以运行的)
+
+go:nowritebarrierrec and go:yeswritebarrierrec
+----------------------------------------------
+
+`go:nowritebarrierrec` 指示编译器遇到写屏障时产生一个错误，
+只不过是递归的，即这个函数调用的其他函数如果有写屏障也会报错。
+`go:yeswritebarrierrec` 意思差不多，包含一个写屏障。
+
+逻辑上说，编译器从每个 `go:nowritebarrierrec` 标记的函数开始搜索调用图
+如果遇到一个函数包含写屏障就会产生一个错误。
+遇到 `go:yeswritebarrierrec` 标记的函数时也会停止。
+
+`go:nowritebarrierrec` 用于写屏障的实现防止死循环。
+
+这两个都则都用于调度器。开启写屏障需要一个活跃的P(`getg().m.p !=nil `)
+且调度器代码运行的时候经常没有活跃的P。
+这种情况下，`go:nowritebarrierrec` 经常用于刚释放了P或者没有P的函数。
+`go:yeswritebarrierrec` 用于代码重新获取了一个活跃的P。
+
+因为他们是函数级别的注视，释放或获取P的代码可能需要分割为两个。
+
+
+go:notinheap
+------------
+
+`go:notinheap` 用于类型声明。它暗示了一个类型不能从gc的堆上分配。
+特别地，指向这个类型的指针在 `runtime.inheap` 检查时必须失败。
+类型必须用于全局变量，栈变量或者非托管内存。
+特别地:
+
+1. `new(T)`, `make([]Y)`, `append([]T, ...)` 和隐式的堆分配是不允许的。
+(虽然隐式分配无论如何在runtime中是不允许的)
+
+2. 指向普通类型的指针(不是 `unsafe.Pointer`) 不能被转化为一个指向
+`go:notinheap` 标记的类型，即使他们有相同的基类。
+
+3. 任何包含 `go:notinheap` 的类型都是 `go:notinheap` 的。 
+结构体和数组是这样。`go:notinheap` 的map和channel不允许的。
+为了明确起见，任何实现了 `go:notinheap` 的类型必须标记为 `go:notinheap`
+
+4. 对于一个指向 `go:notinheap` 的类型的指针，写屏障可以忽略。
+
+最后一点是 `go:notinheap` 的好处。
+runtime用它做低层次的内部结构，避免调度器和内存分配中的内存屏障，
+(内存屏障会引起性能问题甚至是非法的)
+这个机制是相当的安全而且不会降低runtime的可读性。
+
 
 
 
