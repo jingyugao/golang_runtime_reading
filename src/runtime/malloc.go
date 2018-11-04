@@ -897,22 +897,26 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	return x
 }
 
+// 大于32k的分配
 func largeAlloc(size uintptr, needzero bool, noscan bool) *mspan {
 	// print("largeAlloc size=", size, "\n")
 
 	if size+_PageSize < size {
 		throw("out of memory")
 	}
+	// 直接获取要分配多少页
 	npages := size >> _PageShift
 	if size&_PageMask != 0 {
 		npages++
+		// 不能整除 加一页
 	}
-
+	// 这个Credit和debt到底是什么？？？
+	// 谁欠谁的
 	// Deduct credit for this span allocation and sweep if
 	// necessary. mHeap_Alloc will also sweep npages, so this only
 	// pays the debt down to npage pages.
 	deductSweepCredit(npages*_PageSize, npages)
-
+	// 从heap分配
 	s := mheap_.alloc(npages, makeSpanClass(0, noscan), true, needzero)
 	if s == nil {
 		throw("out of memory")
@@ -1042,6 +1046,7 @@ func persistentalloc(size, align uintptr, sysStat *uint64) unsafe.Pointer {
 	return unsafe.Pointer(p)
 }
 
+// 必须在系统栈中调用，由于栈增长可能会调用它
 // Must run on system stack because stack growth can (re)invoke it.
 // See issue 9174.
 //go:systemstack
@@ -1102,6 +1107,10 @@ func persistentalloc1(size, align uintptr, sysStat *uint64) *notInHeap {
 	return p
 }
 
+// notInHeap 是 不在堆中的内存，用于底层的分配如sysAlloc和persistentAlloc
+//
+// 一般来说，最好用真实的类型标记为 go:notinheap，但是对于一些不能处理的情况
+// 作为通用类型处理
 // notInHeap is off-heap memory allocated by a lower-level allocator
 // like sysAlloc or persistentAlloc.
 //

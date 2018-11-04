@@ -11,6 +11,8 @@ import (
 	"unsafe"
 )
 
+// 不要分割stack由于这个函数可能不被一个合法的g调用
+// 防止我们分配更多的stack
 // Don't split the stack as this function may be invoked without a valid G,
 // which prevents us from allocating more stack.
 //go:nosplit
