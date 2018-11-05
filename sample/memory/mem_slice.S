@@ -178,7 +178,7 @@
 	0x0043 00067 (mem_slice.go:16)	JMP	69
 	0x0045 00069 (mem_slice.go:16)	PCDATA	$2, $1
 	0x0045 00069 (mem_slice.go:16)	PCDATA	$0, $0
-	// AX为*_type
+	// AX为*_type,这个_type是byte类型信息
 	0x0045 00069 (mem_slice.go:16)	LEAQ	type.uint8(SB), AX
 	0x004c 00076 (mem_slice.go:16)	PCDATA	$2, $0
 	0x004c 00076 (mem_slice.go:16)	MOVQ	AX, (SP)
@@ -186,7 +186,7 @@
 	0x0050 00080 (mem_slice.go:16)	XORPS	X0, X0
 	0x0053 00083 (mem_slice.go:16)	MOVUPS	X0, 8(SP)
 	0x0058 00088 (mem_slice.go:16)	MOVQ	$0, 24(SP)
-	// 传入cap
+	// 传入cap，结果的长度是1，因此是1。
 	0x0061 00097 (mem_slice.go:16)	MOVQ	$1, 32(SP)
 	
 	0x006a 00106 (mem_slice.go:16)	CALL	runtime.growslice(SB)
@@ -303,8 +303,10 @@
 	0x001d 00029 (mem_slice.go:25)	MOVQ	$0, "".~r0+88(SP)
 	0x0026 00038 (mem_slice.go:25)	XORPS	X0, X0
 	0x0029 00041 (mem_slice.go:25)	MOVUPS	X0, "".~r0+96(SP)
+	// tmpbuf=nil
 	0x002e 00046 (mem_slice.go:26)	MOVQ	$0, (SP)
 	0x0036 00054 (mem_slice.go:26)	PCDATA	$2, $1
+	// 字面值字符串的地址
 	0x0036 00054 (mem_slice.go:26)	LEAQ	go.string."literal string"(SB), AX
 	0x003d 00061 (mem_slice.go:26)	PCDATA	$2, $0
 	// 传入string{data *byte,len int}
