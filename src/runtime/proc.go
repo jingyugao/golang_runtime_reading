@@ -515,7 +515,7 @@ var badmorestackgsignalMsg = "fatal: morestack on gsignal\n"
 //go:nosplit
 //go:nowritebarrierrec
 func badmorestackgsignal() {
-	sp := stringStructOf(&badmorestackgsignalMsg)
+	sp := Of(&badmorestackgsignalMsg)
 	write(2, sp.str, int32(sp.len))
 }
 
