@@ -69,11 +69,17 @@
 	0x0059 00089 (mem_str.go:10)	MOVQ	AX, "".bs+88(SP)
 	0x005e 00094 (mem_str.go:10)	MOVQ	$10, "".bs+96(SP)
 	0x0067 00103 (mem_str.go:10)	MOVQ	$10, "".bs+104(SP)
+	// tempbuf为nil。因为这个string要escape(传出函数),因此会在堆上分配一块内存
+	// 如果不逃逸，则编译器会在栈上分配一段tempbuf。
+	// 这里是go的小细节。
+	// 同时也提示我们，[]byte转string时内存不共享。
 	0x0070 00112 (mem_str.go:11)	MOVQ	$0, (SP)
 	0x0078 00120 (mem_str.go:11)	PCDATA	$2, $1
 	0x0078 00120 (mem_str.go:11)	PCDATA	$0, $0
+	// 字面值的地址
 	0x0078 00120 (mem_str.go:11)	MOVQ	"".bs+88(SP), AX
 	0x007d 00125 (mem_str.go:11)	PCDATA	$2, $0
+	// []byte如栈，AX为data*,10和10分别为len和cap
 	0x007d 00125 (mem_str.go:11)	MOVQ	AX, 8(SP)
 	0x0082 00130 (mem_str.go:11)	MOVQ	$10, 16(SP)
 	0x008b 00139 (mem_str.go:11)	MOVQ	$10, 24(SP)
@@ -131,10 +137,13 @@
 	0x0020 00032 (mem_str.go:14)	MOVUPS	X0, "".~r0+88(SP)
 	0x0025 00037 (mem_str.go:15)	XORPS	X0, X0
 	0x0028 00040 (mem_str.go:15)	MOVUPS	X0, "".ret+56(SP)
+	// 传参数，buf=nil
 	0x002d 00045 (mem_str.go:17)	MOVQ	$0, (SP)
 	0x0035 00053 (mem_str.go:17)	XORPS	X0, X0
+	// stringStruct{str=nil,len=0}
 	0x0038 00056 (mem_str.go:17)	MOVUPS	X0, 8(SP)
 	0x003d 00061 (mem_str.go:17)	PCDATA	$2, $1
+	// stringStruct{str=AX,len=11}
 	0x003d 00061 (mem_str.go:17)	LEAQ	go.string."from append"(SB), AX
 	0x0044 00068 (mem_str.go:17)	PCDATA	$2, $0
 	0x0044 00068 (mem_str.go:17)	MOVQ	AX, 24(SP)
