@@ -92,7 +92,7 @@
 // 垃圾收集器（GC）
 // GC与mutator线程并发运行，类型准确（也称为精确），
 // 允许多个GC线程并行运行。它是一个使用写屏障的并发标记和扫描。
-// 它是非分代和非紧凑的。使用每个P分配区域分离的大小来完成分配以最小化分段，
+// 它是非分代和非压缩的。使用每个P分配区域分离的大小来完成分配以最小化分段，
 // 并发在常见情况下消除锁定。该算法分解为几个步骤。这是对所使用的算法的高级描述。
 
 // 关于GC的概述，理查德琼斯的gchandbook.org是一个很好的起点。
@@ -235,6 +235,14 @@ const (
 // GOGC==0, this will set heapminimum to 0, resulting in constant
 // collection even when the heap size is small, which is useful for
 // debugging.
+// heapminimus是触发GC的堆的最小值。对于小堆，这会覆盖GOGC*live set 规则。
+// live set 即4M，GOGC即gcpercent，减小GOGC可以减小gc触发频率。
+// 如果 live set很小但是有大量的分配，当堆到达GOGC*live时会导致多次GC和GC高负载。
+// 这个最小值可以均摊GC的开销，同时保持堆不会太大。
+//
+// 初始化默认值为 4MB*GOGC/100。GC默认值是100.当GOGC==0时，heapminimum也是0，
+// 结果是即使堆很小也会持续不断的GC，这个可以用来调试。
+
 var heapminimum uint64 = defaultHeapMinimum
 
 // defaultHeapMinimum is the value of heapminimum for GOGC==100.
@@ -261,9 +269,9 @@ func gcinit() {
 	// This will go into computing the initial GC goal.
 	// 初始化heap_marked，让gc触发有个初始目标
 	memstats.heap_marked = uint64(float64(heapminimum) / (1 + memstats.triggerRatio))
-
 	// Set gcpercent from the environment. This will also compute
 	// and set the GC trigger and goal.
+	// 上面的值都不算数， 下面会重新设置
 	_ = setGCPercent(readgogc())
 
 	work.startSema = 1
@@ -1017,6 +1025,7 @@ const gcAssistTimeSlack = 5000
 const gcOverAssistWork = 64 << 10
 
 var work struct {
+	// 这里实现了一个无锁队列，
 	full  lfstack                  // lock-free list of full blocks workbuf
 	empty lfstack                  // lock-free list of empty blocks workbuf
 	pad0  [sys.CacheLineSize]uint8 // prevents false-sharing between full/empty and nproc/nwait
@@ -1048,6 +1057,14 @@ var work struct {
 	//
 	// Put this field here because it needs 64-bit atomic access
 	// (and thus 8-byte alignment even on 32-bit architectures).
+	// bytesMarked是这轮gc标记的byte数。
+	// 包括在并发扫描阶段 待扫描对象里被涂黑的，非扫描对象(直接涂黑)，
+	// 和markroot中扫描到的灰对象。
+	// 在两轮之间会被原子更新。
+	// 每批次更新的值可能是不准确的，因为这个值只会在该轮结束时读到。
+	// (但最后读的时候，这个值是准确的)
+	// 由于标记阶段的竞争，这个数可能不完全等同被标记的bytes，但是应该很接近。
+	// 近似值
 	bytesMarked uint64
 
 	markrootNext uint32 // next markroot job
@@ -1077,6 +1094,9 @@ var work struct {
 	// first root marking pass, whether that's during the
 	// concurrent mark phase in current GC or mark termination in
 	// STW GC.
+	// markrootDown 表明本轮GC中root已经被标记了至少一次。
+	// 无论是代并发清扫阶段或者标记结束阶段，
+	// root标记操作会会检查检查这个值
 	markrootDone bool
 
 	// Each type of GC state transition is protected by a lock.
@@ -1093,7 +1113,15 @@ var work struct {
 	//
 	// startSema protects the transition from "off" to mark or
 	// mark termination.
+	// GC状态的迁移需要加锁。由于多个线程可以同时地监测到状态迁移条件，
+	// 任何检测条件都必须获得合适的转换锁，重新检查这个锁，
+	// 如果不满足条件则返回，否则进行转换。
+	// 同样地，任何转换在释放锁之前必须使转换条件失效。
+	// 这确保每个转换都只会被一个线程操作且需要转换的线程都会阻塞，直到转换状态完成。
+	// 这里用信号量实现的spinlock
+	// startSema保护从off到mark或者mark结束的装套
 	startSema uint32
+	// markDoneSema保护从mark到mark2和mark 2到mark termination的转换
 	// markDoneSema protects transitions from mark 1 to mark 2 and
 	// from mark 2 to mark termination.
 	markDoneSema uint32
@@ -1111,6 +1139,7 @@ var work struct {
 
 	// totaltime is the CPU nanoseconds spent in GC since the
 	// program started if debug.gctrace > 0.
+	// CPU纳秒数
 	totaltime int64
 
 	// initialHeapLive is the value of memstats.heap_live at the
