@@ -3,6 +3,7 @@ package main
 var F string
 var G string
 var H []byte
+var M map[int]int
 
 func sem() string {
 	var s string
@@ -26,6 +27,17 @@ func sem2() []byte {
 	}
 	if H == nil {
 		return nil
+	}
+	return b
+}
+
+func sem3() map[int]int {
+	var b map[int]int
+	if len(M) == 0 {
+		return nil
+	}
+	if M == nil {
+		return M
 	}
 	return b
 }
