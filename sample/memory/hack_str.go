@@ -1,6 +1,9 @@
 package main
 
-import "unsafe"
+import (
+	"fmt"
+	"unsafe"
+)
 
 type mStringStruct struct {
 	str unsafe.Pointer
@@ -30,6 +33,13 @@ type mSliceStruct struct {
 	cap   int
 }
 
+func hack_2() {
+	b1 := []byte{}
+	var b2 []byte
+	fmt.Println(*(*mSliceStruct)(unsafe.Pointer(&b1)))
+	fmt.Println(*(*mSliceStruct)(unsafe.Pointer(&b2)))
+
+}
 func hack_slice() {
 	bs := []byte{'s', 'o', 'm', 'e', ' ', 'b', 'y', 't', 'e'}
 
@@ -46,9 +56,6 @@ func hack_slice() {
 	println(bs == nil, len(bs))
 }
 func main() {
-	println("hack_str")
-	hack_str()
-	println("hack_slice")
-	hack_slice()
+	hack_2()
 
 }

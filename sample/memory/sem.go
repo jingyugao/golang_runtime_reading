@@ -20,8 +20,9 @@ func sem() string {
 
 func sem2() []byte {
 	var b []byte
+	b2 := []byte{}
 	if len(H) == 0 {
-		return nil
+		return b2
 	}
 	if H == nil {
 		return nil
