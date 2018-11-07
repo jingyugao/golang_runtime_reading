@@ -374,6 +374,17 @@ var gcBlackenEnabled uint32
 // since more work is done in the mark phase. This tension is resolved
 // by allocating white until the mark phase is approaching its end and
 // then allocating black for the remainder of the mark phase.
+// gcBlackenPromptly 表明禁止可能把work对全局队列隐藏的优化。(具体看下文)
+//
+// 如果gcBlackenPromptly是true，每个P的 gcWork缓存应该立即刷新，
+// 并且新对象应该分配为黑色。
+//
+// 分配白对象和把他们涂黑之间存在张力。
+// 如果对象是白的，这个对象可能会在被标记之前在本轮GC中被回收。
+// 另一方面，把他们分配为黑色可以减小_GCmarktermination延迟因为mark阶段做了更多的工作。
+// 这个张力被分解为两部分，mark阶段结束前分配为白色对象，剩余阶段分配为黑色。
+// 参考内存分配部分的代码，开启写屏障，如果gcphase!=_GCoff,，并标记为黑色。
+
 var gcBlackenPromptly bool
 
 const (
@@ -396,12 +407,21 @@ func setGCPhase(x uint32) {
 // is mutator assists, which happen in response to allocations and are
 // not scheduled. The other three are variations in the per-P mark
 // workers and are distinguished by gcMarkWorkerMode.
+// gcMarkWorkerMode 代表并发标记工作是否应该操作的模式。
+//
+// 并发标记有四种不同的机制。
+// 一个是mutator assists，这个在应对内存分配时发生且不被调度。
+// 另外三个在每个P的标记works中变化且有不同的gcMarkWOrkerMode
+// ？？？每个P都有三个么
 type gcMarkWorkerMode int
 
 const (
 	// gcMarkWorkerDedicatedMode indicates that the P of a mark
 	// worker is dedicated to running that mark worker. The mark
 	// worker should run without preemption.
+	// gcMarkWorkerDedicatedMode表明一个标记worker的P是专门用来运行这个mark worker的。
+	// 这个mark worker 不被抢占。
+	// 即mutator assist的mode
 	gcMarkWorkerDedicatedMode gcMarkWorkerMode = iota
 
 	// gcMarkWorkerFractionalMode indicates that a P is currently
@@ -410,12 +430,21 @@ const (
 	// an integer. The fractional worker should run until it is
 	// preempted and will be scheduled to pick up the fractional
 	// part of GOMAXPROCS*gcBackgroundUtilization.
+	// gcMarkWorkerFractionalMode表明一个P正在运行部分mark worker。
+	// 如果GOMAXPROCS*gcBackgroundUtilization不是整数，则需要部分worker。
+	// 部分worker 应该一直运行直到被强占，而且可以被调度来拾取
+	// GOMAXPROCS*gcBackgroundUtilization的小数部分。
+	// 大概意思是，这个如果是小数的话，有这个部分worker。
+	// 如果不是小数，这个部分worker会被挂起。
 	gcMarkWorkerFractionalMode
 
 	// gcMarkWorkerIdleMode indicates that a P is running the mark
 	// worker because it has nothing else to do. The idle worker
 	// should run until it is preempted and account its time
 	// against gcController.idleMarkTime.
+	// gcMarkWorkerIdleMode表明一个P由于无事可做才运行mark worker。
+	// idle worker应该一直运行直到被抢占，并且把对应地时间存到gcController.idleMarkTime.
+	// 这个是主要的worker
 	gcMarkWorkerIdleMode
 )
 
@@ -440,6 +469,14 @@ var gcMarkWorkerModeStrings = [...]string{
 //
 // All fields of gcController are used only during a single mark
 // cycle.
+// gcController实现了gc的节奏控制器，决定了何时触发并发gc和
+// mutator assists和background marking标记工作的大小
+//
+// 它基于堆增长和每轮gc的cpu负载使用一个负反馈算法来调节memstats.gc_trigger
+// 这个算法优化使堆增长匹配GOCGC和assist和backgroud marking之间的cpu使用率为25%。
+// 高层设计在这个文档里。
+//
+// 所有的字段都只用于一个单独的mark轮。
 var gcController gcControllerState
 
 type gcControllerState struct {
@@ -452,6 +489,9 @@ type gcControllerState struct {
 	// Currently this is the bytes of heap scanned. For most uses,
 	// this is an opaque unit of work, but for estimation the
 	// definition is important.
+	// scanWOrk是这轮gc的总扫描量。
+	// 轮与轮直接是原子更新的。
+	//
 	scanWork int64
 
 	// bgScanCredit is the scan work credit accumulated by the
