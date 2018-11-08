@@ -455,6 +455,13 @@ func trygetfull() *workbuf {
 // looking for work and thus not capable of creating new work.
 // This is in fact the termination condition for the STW mark
 // phase.
+// 从work.buff链表中获得一个work buff(并将其从链表中移除)
+// 如果没有可用的，等待直到所有的其他gc helper结束，然后返回nil。
+// getfull对work.nproc个helpers充当一个屏障。
+// 只要一个gchelper是激活状态在标记对象，它会创建一个其他helper也能使用的workbuffer。
+// for循环要么存在于当找到一个work buffer，要么所有所有的GC helper都在循环查找work
+// 因此不能创建新的work。
+// 事实上这是STW mark 阶段的终止条件。
 //go:nowritebarrier
 func getfull() *workbuf {
 	b := (*workbuf)(work.full.pop())

@@ -491,7 +491,12 @@ type gcControllerState struct {
 	// definition is important.
 	// scanWOrk是这轮gc的总扫描量。
 	// 轮与轮直接是原子更新的。
+	// 因为每轮之中既读又写，更新总是发生在批次的边界
+	// 一轮结束的时候，这个代表有多少保留的堆被扫描了。
 	//
+	// 目前这个是堆扫描的byte数目。对大多数使用，
+	// 这是一个不透明的工作单元，
+	// 但是用于估计的话这个定义是很重要的。
 	scanWork int64
 
 	// bgScanCredit is the scan work credit accumulated by the
@@ -499,17 +504,23 @@ type gcControllerState struct {
 	// the background scan and stolen by mutator assists. This is
 	// updated atomically. Updates occur in bounded batches, since
 	// it is both written and read throughout the cycle.
+	// bgScanCredit是当前堆background scan积累的扫描工作贷款。
+	// 这个贷款被被background scan积累并被mutator assists偷走。
+	// 这个值是原子更新的。由于一轮中可读可写，因此更新发生在批次的边界。
 	bgScanCredit int64
 
 	// assistTime is the nanoseconds spent in mutator assists
 	// during this cycle. This is updated atomically. Updates
 	// occur in bounded batches, since it is both written and read
 	// throughout the cycle.
+	// 这轮gc的mutator assists花费的毫秒数。
+	// 原子更新，发生在批次的边界。
 	assistTime int64
 
 	// dedicatedMarkTime is the nanoseconds spent in dedicated
 	// mark workers during this cycle. This is updated atomically
 	// at the end of the concurrent mark phase.
+	// dedicatedMarkTime是dedicated mark worker花费的毫秒数
 	dedicatedMarkTime int64
 
 	// fractionalMarkTime is the nanoseconds spent in the
@@ -1122,9 +1133,14 @@ var work struct {
 	//
 	// TODO: This is a temporary fallback to work around races
 	// that cause early mark termination.
+	// helperDrainBlock表明gc mark termiantion helper把gcDrainBlock变为gcDrain来阻止getfull()
+	// 否则，应该传递gcDrainNoblock
+	//
+	// TODO：这是一个暂时的回退以应对work的竞争以防mark 提前结束。
 	helperDrainBlock bool
 
 	// Number of roots of various root types. Set by gcMarkRootPrepare.
+	// 根数目。(包含根变量的)stack的数目，package的数目等等。可能是下面四个的和。
 	nFlushCacheRoots                               int
 	nDataRoots, nBSSRoots, nSpanRoots, nStackRoots int
 
@@ -1184,11 +1200,13 @@ var work struct {
 
 	// initialHeapLive is the value of memstats.heap_live at the
 	// beginning of this GC cycle.
+	// gc开始时的heap_live
 	initialHeapLive uint64
 
 	// assistQueue is a queue of assists that are blocked because
 	// there was neither enough credit to steal or enough work to
 	// do.
+	// assist队列，由于即没有足够的credit也没有足够的work，这些assist阻塞并加入到这个队列。
 	assistQueue struct {
 		lock       mutex
 		head, tail guintptr
@@ -1196,6 +1214,7 @@ var work struct {
 
 	// sweepWaiters is a list of blocked goroutines to wake when
 	// we transition from mark termination to sweep.
+	// 从mark termination到sweep阶段，被阻塞需要唤醒到goroutines
 	sweepWaiters struct {
 		lock mutex
 		head guintptr
@@ -1205,12 +1224,14 @@ var work struct {
 	// cycle is sweep termination, mark, mark termination, and
 	// sweep. This differs from memstats.numgc, which is
 	// incremented at mark termination.
+	// 已完成的gc轮数。这个和memstats.numgc不同，这个在mark termination阶段增加。
 	cycles uint32
 
 	// Timing/utilization stats for this cycle.
+	//
 	stwprocs, maxprocs                 int32
 	tSweepTerm, tMark, tMarkTerm, tEnd int64 // nanotime() of phase start
-
+	//本轮gc总共的stw时间。
 	pauseNS    int64 // total STW time this cycle
 	pauseStart int64 // nanotime() of last STW
 
@@ -1246,6 +1267,19 @@ func GC() {
 	// This all has to be written to deal with the fact that the
 	// GC may move ahead on its own. For example, when we block
 	// until mark termination N, we may wake up in cycle N+2.
+	// 我们认为一轮完整的GC为，sweep termination，mark，mark termination，sweep。
+	// 这个函数在一轮完整的gc结束之前不应该返回。因此我们总是要结束当前GC并开启新的GC。
+	// 这意味着：
+	// 1. 如果在第N轮的sweep termiantion，mark，mark termination阶段，
+	// 阻塞直到mark termination N结束并过渡到sweep N。
+	// 2. 在sweep N，辅助sweep N。
+	// 此时我们可以开启新一轮的GC N+1
+	// 3. 开启sweep termination N+1，N+1轮GC开启
+	// 4. 等待mark termination N+1结束
+	// 5. 帮助sweep N+1直到结束。
+	//
+	// 这用来处理以下事实:GC会自己前进。
+	// 例如，当阻塞直到mark termintaion N时，我们可能在N+2轮中被唤醒，？？？为什么
 
 	gp := getg()
 
@@ -1335,7 +1369,7 @@ type gcTriggerKind int
 const (
 	// gcTriggerAlways indicates that a cycle should be started
 	// unconditionally, even if GOGC is off or we're in a cycle
-	// right now. This cannot be consolidated with other cycles.
+	// right now. This cannot be consolidateconsolidatedd with other cycles.
 	gcTriggerAlways gcTriggerKind = iota
 
 	// gcTriggerHeap indicates that a cycle should be started when
