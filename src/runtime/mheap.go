@@ -192,6 +192,10 @@ var mheap_ mheap
 // * During GC (gcphase != _GCoff), a span *must not* transition from
 //   manual or in-use to free. Because concurrent GC may read a pointer
 //   and then look up its span, the span state must be monotonic.
+
+//
+
+// 当一个MSpan在堆多free list中时，stat为MSpanFree
 type mSpanState uint8
 
 const (

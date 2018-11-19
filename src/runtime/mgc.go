@@ -1284,6 +1284,7 @@ func GC() {
 	gp := getg()
 
 	// Prevent the GC phase or cycle count from changing.
+	// 阻止GC phase或者 轮数变化。
 	lock(&work.sweepWaiters.lock)
 	n := atomic.Load(&work.cycles)
 	if gcphase == _GCmark {
@@ -1300,6 +1301,8 @@ func GC() {
 	// We're now in sweep N or later. Trigger GC cycle N+1, which
 	// will first finish sweep N if necessary and then enter sweep
 	// termination N+1.
+	// 我们处于第N轮的sweep阶段或更晚。触发第N+1轮GC，如果有必要这首先会结束第N轮的sweep
+	// 然后进入第N+1轮的sweep termination
 	gcStart(gcBackgroundMode, gcTrigger{kind: gcTriggerCycle, n: n + 1})
 
 	// Wait for mark termination N+1 to complete.
@@ -1316,6 +1319,8 @@ func GC() {
 	// complete the cycle and because runtime.GC() is often used
 	// as part of tests and benchmarks to get the system into a
 	// relatively stable and isolated state.
+	// 返回之前结束第N+1轮GC。这么做即为了轮数又因为
+	// runtime.GC()经常作为test和benchmarks来使系统进入一个相对稳定和隔离的状态。
 	for atomic.Load(&work.cycles) == n+1 && gosweepone() != ^uintptr(0) {
 		sweep.nbgsweep++
 		Gosched()
