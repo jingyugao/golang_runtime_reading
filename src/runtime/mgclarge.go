@@ -36,6 +36,8 @@ type mTreap struct {
 	treap *treapNode
 }
 
+// treap is randomized binary search tree
+// 随即而茶
 //go:notinheap
 type treapNode struct {
 	right     *treapNode // all treapNodes > this treap node

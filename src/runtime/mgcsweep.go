@@ -178,6 +178,10 @@ func (s *mspan) ensureSwept() {
 // Returns true if the span was returned to heap.
 // If preserve=true, don't return it to heap nor relink in MCentral lists;
 // caller takes care of it.
+// 释放未被标记的块。
+// 清理mark位为了下一轮gc
+// 如果span还给heap则返回true
+// 如果preverve为true，不返回到heap，也不重新连接MCentral lists
 //TODO go:nowritebarrier
 func (s *mspan) sweep(preserve bool) bool {
 	// It's critical that we enter this function with preemption disabled,

@@ -28,7 +28,9 @@ const minPhysPageSize = 4096
 //
 //go:notinheap
 type mheap struct {
-	lock      mutex
+	lock mutex
+	// _MaxMHeapList=1<<(20-13)=128
+	// 按照页来分，大于等于128页的span在freeLarge存
 	free      [_MaxMHeapList]mSpanList // free lists of given length up to _MaxMHeapList
 	freelarge mTreap                   // free treap of length >= _MaxMHeapList
 	busy      [_MaxMHeapList]mSpanList // busy lists of large spans of given length
@@ -65,6 +67,14 @@ type mheap struct {
 	// This is backed by a reserved region of the address space so
 	// it can grow without moving. The memory up to len(spans) is
 	// mapped. cap(spans) indicates the total reserved memory.
+	// spans 是一个查找表(内存地址-->pageID-->mspan)
+	// 对于已经分配的spans，他们的页都指向这个span
+	// 未分配的span，只有最小和最大的页指向span。
+	// 内部的页映射到任意的span。
+	// 从未被分配过的页，对应的spans为nil
+	//
+	// 修改需要加mheap.lock锁。读可以不加锁。
+	// spans[pageID]=mspan
 	spans []*mspan
 
 	// sweepSpans contains two mspan stacks: one of swept in-use
@@ -76,6 +86,8 @@ type mheap struct {
 	// unswept stack and pushes spans that are still in-use on the
 	// swept stack. Likewise, allocating an in-use span pushes it
 	// on the swept stack.
+	// 包括两个mspan栈：一个是使用中清楚的span，一个是使用中未清除的span。
+	// 这两个在一次gc中交换角色。
 	sweepSpans [2]gcSweepBuf
 
 	_ uint32 // align uint64 fields on 32-bit for atomics
@@ -98,6 +110,12 @@ type mheap struct {
 	// accounting for current progress. If we could only adjust
 	// the slope, it would create a discontinuity in debt if any
 	// progress has already been made.
+	// 这些参数表示一个从heap_live到page sweep count的线性函数。
+	// “比例清除系统”通过保持当前页的清除数大于heap_live对应的这条线的点来保证有盈余。
+	// 这条线的斜率是sweepPagesPerByte，截距是(sweepHeapLiveBasis, pagesSweptBasis)
+	// 在任一时刻，系统处于(heap_live，pagesSwept)之中
+	// 需要注意这条线不过原点，而是通过一个我们控制的点。
+
 	pagesInUse         uint64  // pages of spans in stats _MSpanInUse; R/W with mheap.lock
 	pagesSwept         uint64  // pages swept this cycle; updated atomically
 	pagesSweptBasis    uint64  // pagesSwept to use as the origin of the sweep ratio; updated atomically
@@ -193,9 +211,12 @@ var mheap_ mheap
 //   manual or in-use to free. Because concurrent GC may read a pointer
 //   and then look up its span, the span state must be monotonic.
 
-//
+// 一个mSpan就是多个页的集合
 
-// 当一个MSpan在堆多free list中时，stat为MSpanFree
+// (参考spans *[]mspan)当一个MSpan在堆free list中时，stat为MSpanFree,
+// 只有第一页和最后一页映射到span上
+// 当mspan分配了，状态变为MSpanInUse或MSpanManual。
+//
 type mSpanState uint8
 
 const (
@@ -343,12 +364,16 @@ func (s *mspan) layout() (size, n, total uintptr) {
 // indirect call from the fixalloc initializer, the compiler can't see
 // this.
 //
+// 这里的span是指的type mspan。malloc里的span侧重mspan对应的页的内存
+// 给allspans加一个新分配的span
+// 当一个span第一次从spanalloc分配时会调用。当span复用时不会调用
+// 这里要禁止写屏障，因为gcWork分配新的workbuf时会调用
 //go:nowritebarrierrec
 func recordspan(vh unsafe.Pointer, p unsafe.Pointer) {
 	h := (*mheap)(vh)
 	s := (*mspan)(p)
 	if len(h.allspans) >= cap(h.allspans) {
-		n := 64 * 1024 / sys.PtrSize
+		n := 64 * 1024 / sys.PtrSize // 8096 容量初始值
 		if n < cap(h.allspans)*3/2 {
 			n = cap(h.allspans) * 3 / 2
 		}
@@ -358,6 +383,7 @@ func recordspan(vh unsafe.Pointer, p unsafe.Pointer) {
 		if sp.array == nil {
 			throw("runtime: cannot allocate memory")
 		}
+		// cap 为 len的1.5倍
 		sp.len = len(h.allspans)
 		sp.cap = n
 		if len(h.allspans) > 0 {
@@ -369,6 +395,7 @@ func recordspan(vh unsafe.Pointer, p unsafe.Pointer) {
 			sysFree(unsafe.Pointer(&oldAllspans[0]), uintptr(cap(oldAllspans))*unsafe.Sizeof(oldAllspans[0]), &memstats.other_sys)
 		}
 	}
+	// 不用append，提高性能
 	h.allspans = h.allspans[:len(h.allspans)+1]
 	h.allspans[len(h.allspans)-1] = s
 }
@@ -594,24 +621,34 @@ func (h *mheap) reclaimList(list *mSpanList, npages uintptr) uintptr {
 	n := uintptr(0)
 	sg := mheap_.sweepgen
 retry:
+	// sweep generation:
+	// if sweepgen == h->sweepgen - 2, the span needs sweeping
+	// if sweepgen == h->sweepgen - 1, the span is currently being swept
+	// if sweepgen == h->sweepgen, the span is swept and ready to use
+	// h->sweepgen is incremented by 2 after every GC
 	for s := list.first; s != nil; s = s.next {
 		if s.sweepgen == sg-2 && atomic.Cas(&s.sweepgen, sg-2, sg-1) {
+			// 这个span还没有被sweep，设置为正在清理状态
 			list.remove(s)
 			// swept spans are at the end of the list
 			list.insertBack(s) // Puts it back on a busy list. s is not in the treap at this point.
 			unlock(&h.lock)
 			snpages := s.npages
+			// 清理span
 			if s.sweep(false) {
+				// span归还给heap
 				n += snpages
 			}
 			lock(&h.lock)
 			if n >= npages {
+				// 释放够了，返回
 				return n
 			}
 			// the span could have been moved elsewhere
 			goto retry
 		}
 		if s.sweepgen == sg-1 {
+			// 正在被清理
 			// the span is being sweept by background sweeper, skip
 			continue
 		}
@@ -628,6 +665,8 @@ func (h *mheap) reclaim(npage uintptr) {
 	// First try to sweep busy spans with large objects of size >= npage,
 	// this has good chances of reclaiming the necessary space.
 	for i := int(npage); i < len(h.busy); i++ {
+		// 这里不对吧。不一定有npage个的.
+		// 这个函数已经修改了。
 		if h.reclaimList(&h.busy[i], npage) != 0 {
 			return // Bingo!
 		}
@@ -856,6 +895,7 @@ HaveSpan:
 
 	if s.npages > npage {
 		// Trim extra and put it back in the heap.
+		// 切开，后一段是s
 		t := (*mspan)(h.spanalloc.alloc())
 		t.init(s.base()+npage<<_PageShift, s.npages-npage)
 		s.npages = npage
