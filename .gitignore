@@ -6,4 +6,5 @@
 /lib
 /misc
 .DS_Store
+*.swp
 
