@@ -43,7 +43,7 @@ func finishsweep_m() {
 
 	nextMarkBitArenaEpoch()
 }
-
+\
 func bgsweep(c chan int) {
 	sweep.g = getg()
 
@@ -52,7 +52,7 @@ func bgsweep(c chan int) {
 	c <- 1
 	// 休眠
 	goparkunlock(&sweep.lock, "GC sweep wait", traceEvGoBlock, 1)
-
+	// gcSweep结束时会唤醒
 	for {
 		for gosweepone() != ^uintptr(0) {
 			sweep.nbgsweep++
@@ -90,7 +90,7 @@ func sweepone() uintptr {
 		return ^uintptr(0)
 	}
 	atomic.Xadd(&mheap_.sweepers, +1)
-
+	// 失败值。正常情况不可能有这么多页
 	npages := ^uintptr(0)
 	sg := mheap_.sweepgen
 	for {

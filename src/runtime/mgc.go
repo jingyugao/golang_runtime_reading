@@ -297,6 +297,7 @@ func readgogc() int32 {
 // It kicks off the background sweeper goroutine and enables GC.
 // 有main调用，启动后台清扫程序
 func gcenable() {
+	// 这个c是做什么的
 	c := make(chan int, 1)
 	go bgsweep(c)
 	<-c

@@ -4329,6 +4329,7 @@ func procresize(nprocs int32) *p {
 				if getg().m.mcache == nil {
 					throw("missing mcache?")
 				}
+				// 这里把M0的mcache交给P0
 				pp.mcache = getg().m.mcache // bootstrap
 			} else {
 				pp.mcache = allocmcache()
