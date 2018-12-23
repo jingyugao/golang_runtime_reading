@@ -53,6 +53,8 @@ const (
 //go:nowritebarrier
 // 扫描根对象的准备和初始化一些扫描相关的状态
 // 根对象包括栈上的变量、全局变量和一些杂乱的变量（不知道是啥）
+// 只是做个评估，看看大概有多少活要干
+// 好像没啥用
 func gcMarkRootPrepare() {
 	if gcphase == _GCmarktermination {
 		work.nFlushCacheRoots = int(gomaxprocs)
@@ -62,6 +64,7 @@ func gcMarkRootPrepare() {
 
 	// Compute how many data and BSS root blocks there are.
 	// ? BSS是啥意思？
+	// BSS区域，储存全局变量
 	nBlocks := func(bytes uintptr) int {
 		return int((bytes + rootBlockBytes - 1) / rootBlockBytes)
 	}
@@ -74,6 +77,7 @@ func gcMarkRootPrepare() {
 	if !work.markrootDone {
 		// 计算和扫描可读写的全局变量的任务数
 		// ? 未细看
+		// 这里怎么只留了最大的，小的都不算了？
 		for _, datap := range activeModules() {
 			nDataRoots := nBlocks(datap.edata - datap.data)
 			if nDataRoots > work.nDataRoots {
