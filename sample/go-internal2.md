@@ -104,7 +104,8 @@ go tool compile -S test.go
 	0x002b 00043 (test.go:5)	RET	,
 ```
 这里我们关心这一行:
-``` 0x0022 00034 (test.go:4)	CALL	,runtime.printint(SB)
+``` 
+0x0022 00034 (test.go:4)	CALL	,runtime.printint(SB)
 ```
 这个语句的偏移量是`0x0022`。这个偏移量是相对于函数数据的。这一行实际上是调用了`runtime.printint`函数。而函数并不知道`runtime.printint`函数的真实地址。这个函数在不同的目标文件中。因此要通过relocation。下面展示了具体的内容。
 ```
