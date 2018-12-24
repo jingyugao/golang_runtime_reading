@@ -1498,7 +1498,7 @@ func gcStart(mode gcMode, trigger gcTrigger) {
 	}
 
 	// For stats, check if this GC was forced by the user.
-	// 记录是否强制触发gc, gcTriggerCycle是runtime.GC用的
+	// 记录是否强制触发gc, gcTriggerCycle是runtime.GC用的,gcTriggerAlways已经废弃。
 	work.userForced = trigger.kind == gcTriggerAlways || trigger.kind == gcTriggerCycle
 
 	// In gcstoptheworld debug mode, upgrade the mode accordingly.
