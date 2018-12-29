@@ -67,7 +67,7 @@ func sync_runtime_Semrelease(addr *uint32, handoff bool) {
 }
 
 //go:linkname sync_runtime_SemacquireMutex sync.runtime_SemacquireMutex
-func sync_runtime_SemacquireMutex(addr *uint32, lifo bool) {
+func syn_runtime_SemacquireMutex(addr *uint32, lifo bool) {
 	semacquire1(addr, lifo, semaBlockProfile|semaMutexProfile)
 }
 

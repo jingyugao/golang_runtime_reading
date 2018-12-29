@@ -5432,12 +5432,15 @@ func sync_runtime_canSpin(i int) bool {
 	// GOMAXPROCS>1 and there is at least one other running P and local runq is empty.
 	// As opposed to runtime mutex we don't do passive spinning here,
 	// because there can be work on global runq on on other Ps.
+	// active_spin= 4
 	if i >= active_spin || ncpu <= 1 || gomaxprocs <= int32(sched.npidle+sched.nmspinning)+1 {
 		return false
 	}
+	// 调度队列是空，说么不需要自旋
 	if p := getg().m.p.ptr(); !runqempty(p) {
 		return false
 	}
+	// 自旋
 	return true
 }
 

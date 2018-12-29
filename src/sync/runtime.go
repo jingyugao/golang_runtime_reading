@@ -55,6 +55,8 @@ func init() {
 
 // Active spinning runtime support.
 // runtime_canSpin returns true is spinning makes sense at the moment.
+// 这个函数是linkname sync_runtime_canSpin sync.runtime_canSpin
+// 参考go的linkname，可以自定义符号表，类似于c的def文件。
 func runtime_canSpin(i int) bool
 
 // runtime_doSpin does active spinning.

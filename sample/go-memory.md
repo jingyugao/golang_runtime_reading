@@ -25,7 +25,7 @@ tmalloc是通用的内存分配器，通用性往往会降低性能，因此go�
 * 3级:mcache，每个P一个。相当于TLS变量，不需要加锁，很快。
 
 ### span
-go的内存是以span组织的，内存最终是从span中分配的。span主要是给内存做一个bitmap，标记是否使用，有O(1)的分配效率。
+go的内存是以span组织的，一个span是多个页。span主要是给内存做一个bitmap，标记是否使用，有O(1)的分配效率。
 span这个bitmap很巧妙，主要有两个函数。`nextFreeIndex`和`nextFreeFast`
 首先看nextFreeFast:
 ```

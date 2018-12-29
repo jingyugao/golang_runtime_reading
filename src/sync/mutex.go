@@ -34,10 +34,11 @@ type Locker interface {
 }
 
 const (
-	mutexLocked = 1 << iota // mutex is locked
-	mutexWoken
-	mutexStarving
-	mutexWaiterShift = iota
+	// 这里在用itoa故弄玄虚
+	mutexLocked      = 1 << iota // =1 ,mutex is locked
+	mutexWoken                   // =2
+	mutexStarving                // =4
+	mutexWaiterShift = iota      // =3
 
 	// Mutex fairness.
 	//
@@ -71,6 +72,7 @@ const (
 // blocks until the mutex is available.
 func (m *Mutex) Lock() {
 	// Fast path: grab unlocked mutex.
+	// 为0表示初始情况，快速加锁返回。
 	if atomic.CompareAndSwapInt32(&m.state, 0, mutexLocked) {
 		if race.Enabled {
 			race.Acquire(unsafe.Pointer(m))
@@ -86,6 +88,10 @@ func (m *Mutex) Lock() {
 	for {
 		// Don't spin in starvation mode, ownership is handed off to waiters
 		// so we won't be able to acquire the mutex anyway.
+		// mutexLocked是00...01, mutexStarving是00...100
+		// 最后一位是1,倒数第三位是0。(其他位是多少下文分析，这里不影响)
+		// 说名是锁着的，但不是极饿。
+		// runtime_canSpin说明可以自旋。
 		if old&(mutexLocked|mutexStarving) == mutexLocked && runtime_canSpin(iter) {
 			// Active spinning makes sense.
 			// Try to set mutexWoken flag to inform Unlock
@@ -101,9 +107,11 @@ func (m *Mutex) Lock() {
 		}
 		new := old
 		// Don't try to acquire starving mutex, new arriving goroutines must queue.
+		// 不是饥饿模式，加锁
 		if old&mutexStarving == 0 {
 			new |= mutexLocked
 		}
+		// 锁了或者饥饿
 		if old&(mutexLocked|mutexStarving) != 0 {
 			new += 1 << mutexWaiterShift
 		}
@@ -111,6 +119,7 @@ func (m *Mutex) Lock() {
 		// But if the mutex is currently unlocked, don't do the switch.
 		// Unlock expects that starving mutex has waiters, which will not
 		// be true in this case.
+		//
 		if starving && old&mutexLocked != 0 {
 			new |= mutexStarving
 		}
@@ -124,6 +133,7 @@ func (m *Mutex) Lock() {
 		}
 		if atomic.CompareAndSwapInt32(&m.state, old, new) {
 			if old&(mutexLocked|mutexStarving) == 0 {
+				// 即没有锁，也不是饥饿模式
 				break // locked the mutex with CAS
 			}
 			// If we were already waiting before, queue at the front of the queue.
@@ -131,7 +141,9 @@ func (m *Mutex) Lock() {
 			if waitStartTime == 0 {
 				waitStartTime = runtime_nanotime()
 			}
+			// 等待
 			runtime_SemacquireMutex(&m.sema, queueLifo)
+			// 此处是临界区，
 			starving = starving || runtime_nanotime()-waitStartTime > starvationThresholdNs
 			old = m.state
 			if old&mutexStarving != 0 {
