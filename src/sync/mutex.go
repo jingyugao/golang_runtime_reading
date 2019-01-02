@@ -82,6 +82,10 @@ func (m *Mutex) Lock() {
 
 	var waitStartTime int64
 	starving := false
+	// awoke表示是否禁止唤醒
+	// 如果我在自旋，那么必须要禁止唤醒，不然被唤醒的会跟我竞争。
+	// 如果我是被唤醒的，那么我解锁时必须唤醒下一个。
+	// 要保证
 	awoke := false
 	iter := 0
 	old := m.state
@@ -98,6 +102,8 @@ func (m *Mutex) Lock() {
 			// to not wake other blocked goroutines.
 			if !awoke && old&mutexWoken == 0 && old>>mutexWaiterShift != 0 &&
 				atomic.CompareAndSwapInt32(&m.state, old, old|mutexWoken) {
+				// 这里打开了wutexWoken
+				// 一会要记得消除
 				awoke = true
 			}
 			runtime_doSpin()
@@ -129,6 +135,7 @@ func (m *Mutex) Lock() {
 			if new&mutexWoken == 0 {
 				throw("sync: inconsistent mutex state")
 			}
+			// 置为零，这样解锁的时候会唤醒。
 			new &^= mutexWoken
 		}
 		if atomic.CompareAndSwapInt32(&m.state, old, new) {
@@ -191,10 +198,13 @@ func (m *Mutex) Unlock() {
 	}
 
 	// Fast path: drop lock bit.
+	// 这里资源已经释放了。
 	new := atomic.AddInt32(&m.state, -mutexLocked)
 	if (new+mutexLocked)&mutexLocked == 0 {
 		throw("sync: unlock of unlocked mutex")
 	}
+	// 这里只是做一个唤醒工作
+	// 唤醒工作可以随意一些。
 	if new&mutexStarving == 0 {
 		old := new
 		for {
@@ -204,10 +214,13 @@ func (m *Mutex) Unlock() {
 			// goroutine to the next waiter. We are not part of this chain,
 			// since we did not observe mutexStarving when we unlocked the mutex above.
 			// So get off the way.
+			// 如果没有等待者，或者一个协程已经获取了锁，或者mutexWoken是开的，或者是饥饿模式
+			// 不需要唤醒。
 			if old>>mutexWaiterShift == 0 || old&(mutexLocked|mutexWoken|mutexStarving) != 0 {
 				return
 			}
 			// Grab the right to wake someone.
+			// 唤醒,防止并发唤醒。
 			new = (old - 1<<mutexWaiterShift) | mutexWoken
 			if atomic.CompareAndSwapInt32(&m.state, old, new) {
 				runtime_Semrelease(&m.sema, false)
