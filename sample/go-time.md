@@ -1,18 +1,16 @@
-#go time分析
+go time分析
 
 # 时间的测量
 在os中，有两个时钟:墙上时钟和单调时钟.
 1. 墙上时钟. (wall time, real time)
- 墙上时钟代表了一个诸如"2019年1月1日0点0分0秒"的时间。是面向人的。
 2. 单调时钟. (monotonic time)
- 单调时钟代表了系统启动以来的秒数(准确的说，是一个节拍数)。是面向机器的。
 
 由于石英钟本身的误差，时间会有闰秒等原因，单调时钟与墙上时钟不一致。
 两个时钟的具体含义参见《深入理解linux内核》
+
 linux如何获取时间呢，很简单的一个思路是，
 系统启动时通过daytime服务获得一个时间t0，并记录此时的单调时钟d0。
 下次获得时间时，只需要获得单调时钟d,然后d-d0+t0即可获取墙上时钟。
-(当然，现在的计算机会有独立的设备存储墙上时钟以应对断电情况)
 
 # Time结构体分析
 ```go
@@ -27,7 +25,7 @@ type Time struct {
 
 顾名思义，loc代表时区信息，wall跟墙上时钟有关，剩下的ext跟模式有关。
 通过阅读注释，这里的time 有两种模式，是否包含单调时钟。
-(什么时候会不含单调时钟呢？通过外部输入的时间。因为单调时钟是本机硬件的节拍数，不同机器没有可比性)
+(什么时候会不含单调时钟呢？外部输入的时间。因为单调时钟是本机硬件的节拍数，不同机器没有可比性)
 * 如果包含单调时钟，那么wall中会包含一个时间戳秒(代表墙上时钟),和一个时间戳纳秒(代表墙上时钟),ext字段储存单调时钟。
 * 如果不包含单调时钟,那么wall包含一个时间戳纳秒(代表墙上时钟)，ext包含一个时间戳秒(代表墙上时钟)
 
@@ -63,7 +61,7 @@ func time_now() (sec int64, nsec int32, mono int64) {
 	return sec, nsec, nanotime()
 }
 ```
-这里的从runtime包反向linkname到time包，比较罕见的操作。
+这个函数从runtime包反向linkname到time包，比较罕见的操作。
 nanotime对应了runtimeNaon.
 继续分析，下面就是汇编了。分析统一写在行前。
 ```asm
@@ -73,7 +71,8 @@ TEXT runtime·walltime(SB),NOSPLIT,$0-12
 	MOVQ	SP, BP	// Save old SP; BP unchanged by C code.
     // tls代表type runtime.g指针，这里把g指针放到CX
 	get_tls(CX)
-    // 然后又放到AX? 不明白的操作 
+    // 上文有#define	g(r)	0(r)(TLS*1)
+    // 这里是
 	MOVQ	g(CX), AX
     // 把g.m放到BX里
 	MOVQ	g_m(AX), BX // BX unchanged by C code.
@@ -209,6 +208,7 @@ int clock_gettime(clockid_t clock_id, struct timespec *tp);
 粗略的说，now的开销是nanotime的两倍。
 
 
+
 还有一种获取时间的方式是通过`time.Parse`,刨除各种if-else,最终调用了
 ```go
 func unixTime(sec int64, nsec int32) Time {
@@ -263,6 +263,9 @@ func (t Time) Sub(u Time) Duration {
 sub的代码也很直观，检查一下是否溢出，正常情况下秒数求差即可。
 
 
+### 其他
+严格来说，go程序获取时间不能称作syscall，应该叫做"vsdo"，通过这种技术可以避免context切换。
+极大的提高调用速度。
 
 
 
